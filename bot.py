@@ -323,13 +323,23 @@ async def create_offer_from_message(message, business: bool):
             )
             return
 
-        # Ignore messages authored by the connected business account itself.
-        if connection.user and message.from_user.id == connection.user.id:
-            log.info("BUSINESS_OFFER_IGNORED owner_message chat_id=%s", message.chat.id)
+        # The seller types the offer command in the buyer's private chat.
+        # For outgoing Business messages, from_user is the seller while chat.id
+        # identifies the buyer. Do not discard these owner-authored commands.
+        if not connection.user or message.from_user.id != connection.user.id:
+            log.info(
+                "BUSINESS_OFFER_IGNORED not_owner_command chat_id=%s sender_id=%s owner_id=%s",
+                message.chat.id,
+                message.from_user.id,
+                connection.user.id if connection.user else None,
+            )
             return
-        seller_id = connection.user.id if connection.user else message.chat.id
+        seller_id = connection.user.id
 
-    buyer_username = message.from_user.username if message.from_user else None
+    buyer_username = (
+        message.chat.username if business
+        else (message.from_user.username if message.from_user else None)
+    )
     order_id = generate_order_id()
     text = make_offer_text(gift, amount, currency, buyer_username)
     keyboard = offer_keyboard(0)
@@ -346,7 +356,7 @@ async def create_offer_from_message(message, business: bool):
                 amount,
                 currency,
                 seller_id,
-                message.from_user.id if message.from_user else None,
+                message.chat.id if business else (message.from_user.id if message.from_user else None),
                 datetime.now().isoformat(),
                 message.chat.id,
                 connection_id,
