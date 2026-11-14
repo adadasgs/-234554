@@ -25,7 +25,6 @@ if not BOT_TOKEN:
 MANAGER_USERNAME = "Autooffersgift"
 MANAGER_LINK = "tg://send_gift?to=Autooffersgift"
 
-# Примерный курс Stars → USD
 STARS_TO_USD = 0.013
 # ===============================================
 
@@ -36,7 +35,6 @@ bot = Bot(
 dp = Dispatcher(storage=MemoryStorage())
 
 
-# ---------- База данных ----------
 async def init_db():
     async with aiosqlite.connect("offers.db") as db:
         await db.execute("""
@@ -61,21 +59,23 @@ def generate_order_id() -> str:
     return f"TG-{datetime.now().strftime('%y%m%d%H%M%S')[2:]}"
 
 
-# ---------- Красивые тексты ----------
 def make_offer_text(gift: str, amount: int, buyer_username: str | None = None) -> str:
     usd = round(amount * STARS_TO_USD, 2)
     gift_link = f"https://t.me/nft/{gift}"
     buyer = f"@{buyer_username}" if buyer_username else "Покупатель"
 
     return f"""
-🎁 <b>Новое предложение о покупке</b>
+✨ <b>Новое предложение</b> ✨
 
-👤 {buyer} предлагает купить ваш NFT-подарок:
+👤 {buyer} хочет купить ваш подарок
 
-🔗 <b><a href="{gift_link}">{gift}</a></b>
+🎁 <b><a href="{gift_link}">{gift}</a></b>
 
-💰 <b>Предложение:</b> <code>{amount}</code> ⭐ Stars
+━━━━━━━━━━━━━━━━━━━━
+💎 <b>Сумма предложения</b>
+⭐️ <code>{amount}</code> <b>Stars</b>
 💵 ≈ <b>${usd}</b> USD
+━━━━━━━━━━━━━━━━━━━━
 
 ⏳ Офер действует ограниченное время
 """.strip()
@@ -89,7 +89,7 @@ def make_accepted_text(gift: str, amount: int, order_id: str) -> str:
 ✅ <b>Предложение принято</b>
 
 🎁 NFT: <a href="{gift_link}"><b>{gift}</b></a>
-💰 Сумма: <code>{amount}</code> ⭐ Stars (≈ ${usd} USD)
+⭐️ Сумма: <code>{amount}</code> Stars (≈ ${usd} USD)
 📄 Заказ: <code>{order_id}</code>
 
 ━━━━━━━━━━━━━━━━━━━━
@@ -105,12 +105,11 @@ def make_waiting_text(amount: int) -> str:
 
 Ожидаемое время проверки: <b>до 30 минут</b>
 
-💰 Сумма: <code>{amount}</code> ⭐ Stars
+⭐️ Сумма: <code>{amount}</code> Stars
 💵 ≈ <b>${usd}</b> USD
 """.strip()
 
 
-# ---------- Клавиатуры ----------
 def offer_keyboard(offer_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [
@@ -131,7 +130,6 @@ def accepted_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
-# ---------- Хендлеры ----------
 @dp.message(CommandStart())
 async def cmd_start(message: Message):
     await message.answer(
@@ -160,6 +158,11 @@ async def create_offer(message: Message):
         currency = "grams"
 
     order_id = generate_order_id()
+
+    try:
+        await message.delete()
+    except Exception:
+        pass
 
     async with aiosqlite.connect("offers.db") as db:
         cursor = await db.execute(
@@ -244,7 +247,6 @@ async def confirm_transfer(callback: CallbackQuery):
     await callback.answer("Ожидаем поступление...")
 
 
-# ---------- Простой веб-сервер для Render ----------
 async def health_handler(request):
     return web.Response(text="Bot is running")
 
@@ -261,11 +263,9 @@ async def start_web_server():
     print(f"Web server started on port {port}")
 
 
-# ---------- Запуск ----------
 async def main():
     await init_db()
     
-    # Запускаем веб-сервер и бота параллельно
     await asyncio.gather(
         start_web_server(),
         dp.start_polling(bot)
