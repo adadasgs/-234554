@@ -287,7 +287,10 @@ async def accept_offer(callback: CallbackQuery):
     text = make_accepted_text(gift, amount, order_id)
     kb = accepted_keyboard()
 
-    await callback.message.edit_text(text, reply_markup=kb)
+    if callback.message.photo:
+        await callback.message.edit_caption(caption=text, reply_markup=kb)
+    else:
+        await callback.message.edit_text(text, reply_markup=kb)
     await callback.answer("✅ Принято")
 
     try:
@@ -302,7 +305,10 @@ async def accept_offer(callback: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("decline:"))
 async def decline_offer(callback: CallbackQuery):
-    await callback.message.edit_text("❌ Отклонено")
+    if callback.message.photo:
+        await callback.message.edit_caption(caption="❌ Отклонено", reply_markup=None)
+    else:
+        await callback.message.edit_text("❌ Отклонено", reply_markup=None)
     await callback.answer()
 
 
