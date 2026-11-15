@@ -101,10 +101,10 @@ async def fetch_nft_image(gift: str) -> str | None:
                 if response.status != 200:
                     return None
                 page = await response.text()
-        for tag in re.findall(r"<meta\\b[^>]*>", page, flags=re.IGNORECASE):
-            if not re.search(r"""(?:property|name)\\s*=\\s*["']og:image["']""", tag, flags=re.IGNORECASE):
+        for tag in re.findall(r"<meta\b[^>]*>", page, flags=re.IGNORECASE):
+            if not re.search(r"""(?:property|name)\s*=\s*["']og:image["']""", tag, flags=re.IGNORECASE):
                 continue
-            match = re.search(r"""content\\s*=\\s*["']([^"']+)["']""", tag, flags=re.IGNORECASE)
+            match = re.search(r"""content\s*=\s*["']([^"']+)["']""", tag, flags=re.IGNORECASE)
             if match:
                 return html.unescape(match.group(1))
     except Exception as exc:
@@ -166,7 +166,7 @@ async def cmd_offer(message: Message, state: FSMContext):
 async def create_offer_from_text(message: Message, state: FSMContext | None = None):
     raw_text = (message.text or "").strip()
     match = re.match(
-        r"^(?:https?://t\\.me/nft/)?([A-Za-z0-9]+-\\d+)\\s+(\\d+)\\s+([A-Za-z]{2,5})$",
+        r"^(?:https?://t\.me/nft/)?([A-Za-z0-9]+-\d+)\s+(\d+)\s+([A-Za-z]{2,5})$",
         raw_text,
         re.IGNORECASE,
     )
@@ -207,7 +207,7 @@ async def create_offer_from_text(message: Message, state: FSMContext | None = No
     )
 
 
-@dp.message(F.chat.type == "private", F.text.regexp(r"^(?:https?://t\\.me/nft/)?[A-Za-z0-9]+-\\d+\\s+\\d+\\s+[A-Za-z]{2,5}$"))
+@dp.message(F.chat.type == "private", F.text.regexp(r"^(?:https?://t\.me/nft/)?[A-Za-z0-9]+-\d+\s+\d+\s+[A-Za-z]{2,5}$"))
 async def direct_offer_input(message: Message, state: FSMContext):
     await create_offer_from_text(message, state)
 
