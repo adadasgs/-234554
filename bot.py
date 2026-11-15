@@ -160,7 +160,7 @@ async def cmd_start(message: Message):
 @dp.message(F.text.func(lambda value: isinstance(value, str) and value.strip().casefold() == "оффер"))
 async def cmd_offer(message: Message, state: FSMContext):
     await state.set_state(OfferState.waiting_for_data)
-    await message.answer("Кидай данные:\n<code>SnoopCigar-84846 3200 stars</code>")
+    await message.answer("Отправь NFT, сумму и язык одной строкой:\n<code>SignetRing-9041 1200 ru</code>")
 
 
 async def create_offer_from_text(message: Message, state: FSMContext | None = None):
