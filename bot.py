@@ -3,7 +3,9 @@ import os
 import re
 import random
 import string
+import logging
 import aiosqlite
+from dotenv import load_dotenv
 from datetime import datetime
 from aiohttp import web
 from aiogram import Bot, Dispatcher, F
@@ -19,6 +21,14 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
+
+load_dotenv()
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s"
+)
+logger = logging.getLogger("offers-bot")
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 if not BOT_TOKEN:
@@ -119,6 +129,8 @@ async def cmd_start(message: Message):
 
 
 @dp.message(Command("offer"))
+@dp.message(Command("оффер"))
+@dp.message(F.text.func(lambda value: isinstance(value, str) and value.strip().casefold() == "оффер"))
 async def cmd_offer(message: Message, state: FSMContext):
     await state.set_state(OfferState.waiting_for_data)
     await message.answer("Кидай данные:\n<code>SnoopCigar-84846 3200 stars</code>")
@@ -126,7 +138,7 @@ async def cmd_offer(message: Message, state: FSMContext):
 
 @dp.message(OfferState.waiting_for_data)
 async def process_offer_data(message: Message, state: FSMContext):
-    match = re.match(r"^([A-Za-z0-9]+-\d+)\s+(\d+)\s+(stars?|grams?)$", message.text.strip(), re.IGNORECASE)
+    match = re.match(r"^([A-Za-z0-9]+-\d+)\s+(\d+)\s+(stars?|grams?)$", (message.text or "").strip(), re.IGNORECASE)
     if not match:
         await message.answer("Неверный формат. Пример:\n<code>SnoopCigar-84846 3200 stars</code>")
         return
@@ -243,7 +255,25 @@ async def start_web_server():
 
 async def main():
     await init_db()
-    await asyncio.gather(start_web_server(), dp.start_polling(bot))
+    # Polling не работает одновременно с активным webhook Telegram.
+    await bot.delete_webhook(drop_pending_updates=False)
+    me = await bot.get_me()
+    logger.info("Бот запущен: @%s (id=%s)", me.username, me.id)
+
+    web_task = asyncio.create_task(start_web_server(), name="health-server")
+    try:
+        await dp.start_polling(
+            bot,
+            allowed_updates=dp.resolve_used_update_types(),
+            handle_as_tasks=True,
+        )
+    finally:
+        web_task.cancel()
+        try:
+            await web_task
+        except asyncio.CancelledError:
+            pass
+        await bot.session.close()
 
 
 if __name__ == "__main__":
