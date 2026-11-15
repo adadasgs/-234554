@@ -4,6 +4,8 @@ import re
 import random
 import string
 import logging
+import html
+import aiohttp
 import aiosqlite
 from dotenv import load_dotenv
 from datetime import datetime
@@ -14,7 +16,8 @@ from aiogram.types import (
     Message, 
     CallbackQuery, 
     InlineKeyboardMarkup, 
-    InlineKeyboardButton
+    InlineKeyboardButton,
+    LinkPreviewOptions
 )
 from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
@@ -72,17 +75,41 @@ def generate_order_id():
     return f"TG-{datetime.now().strftime('%y%m%d%H%M%S')[2:]}"
 
 
-def make_offer_text(gift: str, amount: int, buyer_username: str | None = None) -> str:
-    usd = round(amount * STARS_TO_USD, 2)
+def make_offer_text(gift: str, amount: int, buyer_username: str | None = None, language: str = "ru") -> str:
     gift_link = f"https://t.me/nft/{gift}"
-    buyer = f"@{buyer_username}" if buyer_username else "Покупатель"
-
+    buyer = f"@{html.escape(buyer_username)}" if buyer_username else "Покупатель"
+    safe_gift = html.escape(gift)
     return (
-        f"✨ <b>Оффер</b>\n\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "✨ <b>НОВЫЙ ОФФЕР НА NFT</b> ✨\n"
+        "━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"🎁 <a href=\"{gift_link}\"><b>{safe_gift}</b></a>\n"
+        f"⭐️ <b>{amount:,} STARS</b>\n"
         f"👤 {buyer}\n"
-        f"🎁 <a href=\"{gift_link}\"><b>{gift}</b></a>\n\n"
-        f"⭐️ <b>{amount}</b> Stars  ·  ≈ ${usd}"
+        f"🌐 Язык: <b>{html.escape(language.upper())}</b>\n\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "👇 <b>Выберите действие</b>"
     )
+
+
+async def fetch_nft_image(gift: str) -> str | None:
+    url = f"https://t.me/nft/{gift}"
+    timeout = aiohttp.ClientTimeout(total=8)
+    try:
+        async with aiohttp.ClientSession(timeout=timeout, headers={"User-Agent": "Mozilla/5.0"}) as session:
+            async with session.get(url, allow_redirects=True) as response:
+                if response.status != 200:
+                    return None
+                page = await response.text()
+        for tag in re.findall(r"<meta\\b[^>]*>", page, flags=re.IGNORECASE):
+            if not re.search(r"""(?:property|name)\\s*=\\s*["']og:image["']""", tag, flags=re.IGNORECASE):
+                continue
+            match = re.search(r"""content\\s*=\\s*["']([^"']+)["']""", tag, flags=re.IGNORECASE)
+            if match:
+                return html.unescape(match.group(1))
+    except Exception as exc:
+        logger.warning("Не удалось получить изображение NFT %s: %s", gift, exc)
+    return None
 
 
 def make_accepted_text(gift: str, amount: int, order_id: str) -> str:
@@ -136,31 +163,58 @@ async def cmd_offer(message: Message, state: FSMContext):
     await message.answer("Кидай данные:\n<code>SnoopCigar-84846 3200 stars</code>")
 
 
-@dp.message(OfferState.waiting_for_data)
-async def process_offer_data(message: Message, state: FSMContext):
-    match = re.match(r"^([A-Za-z0-9]+-\d+)\s+(\d+)\s+(stars?|grams?)$", (message.text or "").strip(), re.IGNORECASE)
+async def create_offer_from_text(message: Message, state: FSMContext | None = None):
+    raw_text = (message.text or "").strip()
+    match = re.match(
+        r"^(?:https?://t\\.me/nft/)?([A-Za-z0-9]+-\\d+)\\s+(\\d+)\\s+([A-Za-z]{2,5})$",
+        raw_text,
+        re.IGNORECASE,
+    )
     if not match:
-        await message.answer("Неверный формат. Пример:\n<code>SnoopCigar-84846 3200 stars</code>")
+        await message.answer(
+            "Неверный формат. Отправь одной строкой:\n"
+            "<code>SignetRing-9041 1200 ru</code>"
+        )
         return
 
     gift = match.group(1)
     amount = int(match.group(2))
-    currency = "stars" if match.group(3).lower().startswith("star") else "grams"
+    language = match.group(3).lower()
+    if amount <= 0:
+        await message.answer("Количество Stars должно быть больше нуля.")
+        return
 
     code = generate_code()
     order_id = generate_order_id()
-
     async with aiosqlite.connect("offers.db") as db:
         await db.execute(
             """INSERT INTO offers (code, order_id, gift, amount, currency, buyer_id, buyer_username, status, created_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (code, order_id, gift, amount, currency, message.from_user.id,
+            (code, order_id, gift, amount, language, message.from_user.id,
              message.from_user.username, "pending", datetime.now().isoformat())
         )
         await db.commit()
 
-    await state.clear()
-    await message.answer(f"Код готов:\n\n<code>{code}</code>\n\nКинь этот код в чат с владельцем подарка.")
+    if state is not None:
+        await state.clear()
+    await message.answer(
+        "✅ <b>Код для отправки оффера готов</b>\n\n"
+        f"🎁 <b>{html.escape(gift)}</b>\n"
+        f"⭐️ <b>{amount:,} Stars</b>\n"
+        f"🌐 Язык: <b>{html.escape(language.upper())}</b>\n\n"
+        f"Твой код: <code>{code}</code>\n\n"
+        "Скопируй код и отправь его в чат покупателя."
+    )
+
+
+@dp.message(F.chat.type == "private", F.text.regexp(r"^(?:https?://t\\.me/nft/)?[A-Za-z0-9]+-\\d+\\s+\\d+\\s+[A-Za-z]{2,5}$"))
+async def direct_offer_input(message: Message, state: FSMContext):
+    await create_offer_from_text(message, state)
+
+
+@dp.message(OfferState.waiting_for_data)
+async def process_offer_data(message: Message, state: FSMContext):
+    await create_offer_from_text(message, state)
 
 
 @dp.message(F.text.regexp(r"^[A-Z0-9]{5}$"))
@@ -169,7 +223,7 @@ async def handle_code(message: Message):
 
     async with aiosqlite.connect("offers.db") as db:
         async with db.execute(
-            "SELECT id, gift, amount, buyer_username, order_id FROM offers WHERE code = ? AND status = 'pending'",
+            "SELECT id, gift, amount, buyer_username, order_id, currency FROM offers WHERE code = ? AND status = 'pending' LIMIT 1",
             (code,)
         ) as cursor:
             offer = await cursor.fetchone()
@@ -177,16 +231,40 @@ async def handle_code(message: Message):
     if not offer:
         return
 
-    offer_id, gift, amount, buyer_username, order_id = offer
+    offer_id, gift, amount, buyer_username, order_id, language = offer
 
     try:
         await message.delete()
     except Exception:
         pass
 
-    text = make_offer_text(gift, amount, buyer_username)
+    text = make_offer_text(gift, amount, buyer_username, language or "ru")
     kb = offer_keyboard(offer_id)
-    await message.answer(text, reply_markup=kb, disable_web_page_preview=False)
+    image_url = await fetch_nft_image(gift)
+    if image_url:
+        try:
+            await message.answer_photo(photo=image_url, caption=text, reply_markup=kb)
+        except Exception as exc:
+            logger.warning("Не удалось отправить NFT-картинку %s: %s", gift, exc)
+            await message.answer(
+                text,
+                reply_markup=kb,
+                link_preview_options=LinkPreviewOptions(
+                    url=f"https://t.me/nft/{gift}",
+                    prefer_large_media=True,
+                    show_above_text=True,
+                ),
+            )
+    else:
+        await message.answer(
+            text,
+            reply_markup=kb,
+            link_preview_options=LinkPreviewOptions(
+                url=f"https://t.me/nft/{gift}",
+                prefer_large_media=True,
+                show_above_text=True,
+            ),
+        )
 
     async with aiosqlite.connect("offers.db") as db:
         await db.execute("UPDATE offers SET status = 'sent' WHERE id = ?", (offer_id,))
